@@ -47,10 +47,9 @@ pub const Lexer = struct {
                         '}' => .rbrace,
                         else => .illegal,
                     };
-                    // 特殊情况：处理双字符和单字符的歧义
                     if (ch == '=') {
                         if (l.peekChar() == '=') {
-                            l.readChar(); // 移动到第二个 =
+                            l.readChar();
                             token_type = .eq;
                         } else {
                             token_type = .assign;
@@ -63,7 +62,6 @@ pub const Lexer = struct {
                             token_type = .bang;
                         }
                     }
-                    // 统一处理单字符追加
                     try list.append(gpa, .{ .Type = token_type, .Literal = l.source[start..l.rdPosition] });
                     std.debug.print("Literal {s}\n", .{l.source[l.atPosition..l.rdPosition]});
                     l.readChar();

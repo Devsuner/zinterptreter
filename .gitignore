@@ -2,7 +2,6 @@ zig-out/
 exsrc/
 .zig-cache/
 
-*.md
 
 reference/
 exsrc/

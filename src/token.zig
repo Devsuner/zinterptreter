@@ -1,10 +1,9 @@
 const std = @import("std");
 pub const TokenType = union(enum(u8)) {
-    // 基础
     illegal,
     eof,
-    ident: []const u8, // 存储变量名切片
-    int: i64, // 存储 Lexer 预解析后的 64 位整数
+    ident,
+    int: i64, // 少一次转换
 
     // 运算符
     assign,
@@ -26,7 +25,7 @@ pub const TokenType = union(enum(u8)) {
     lbrace,
     rbrace,
 
-    // 关键字 (使用 @"..." 避让 Zig 关键字)
+    // 关键字
     function,
     let,
     true,
@@ -46,6 +45,6 @@ pub const keywords = std.StaticStringMap(TokenType).initComptime(.{
     .{ "return", .@"return" },
 });
 pub const Token = struct {
-    Type: TokenType, // 包含类型标记和解析后的值
-    Literal: []const u8, // 原始切片，用于报错信息
+    Type: TokenType,
+    Literal: []const u8, // 原始切片，用于报错信息的打印
 };

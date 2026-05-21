@@ -10,11 +10,14 @@ pub const Program = struct {
             return "";
         }
     }
-    pub fn string(self: *const Program) []const u8 {
+    pub fn string(self: *const Program, allocator: std.mem.Allocator) ![]const u8 {
+        var buf: std.ArrayList(u8) = .empty;
         for (self.statements.items) |stmt| {
-            const s = try stmt.string();
-            return s;
+            const s = try stmt.string(allocator);
+            defer allocator.free(s);
+            try buf.appendSlice(allocator, s);
         }
+        return buf.toOwnedSlice(allocator);
     }
 };
 // pub const Node = union(enum) {
@@ -33,21 +36,23 @@ pub const Program = struct {
 // };
 
 pub const Statement = union(enum) {
-    let_statement: *LetStatemnet,
+    let_statement: *LetStatement,
     return_statement: *ReturnStatement,
     expression: *ExpressionStatement,
     block: *BlockStatement,
-    pub fn tokenLiteral(self: *Statement) []const u8 {
-        return switch (self) {
+    pub fn tokenLiteral(self: *const Statement) []const u8 {
+        return switch (self.*) {
             .let_statement => |ls| ls.token.Literal,
-            // .return_statement => |rs| rs.
+            .return_statement => |rs| rs.token.Literal,
+            .expression => |es| es.tokenLiteral(),
+            .block => |bs| bs.token.Literal,
         };
     }
 
-    pub fn string(self: *Statement, allocator: std.mem.Allocator) ![]const u8 {
+    pub fn string(self: *Statement, allocator: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
         return switch (self.*) {
-            .let => |s| s.string(allocator),
-            .return_ => |s| s.string(allocator),
+            .let_statement => |s| s.string(allocator),
+            .return_statement => |s| s.string(allocator),
             .expression => |s| s.string(allocator),
             .block => |s| s.string(allocator),
         };
@@ -65,10 +70,17 @@ pub const Expression = union(enum) {
     call: *CallExpression,
     pub fn tokenLiteral(self: *Expression) []const u8 {
         return switch (self.*) {
-            .identifer => |i| i.token.Literal,
+            .identifier => |i| i.token.Literal,
+            .boolean => |b| b.token.Literal,
+            .integer => |il| il.token.Literal,
+            .prefix => |pe| pe.token.Literal,
+            .infix => |ie| ie.token.Literal,
+            .if_expr => |ie| ie.token.Literal,
+            .function => |fl| fl.token.Literal,
+            .call => |ce| ce.token.Literal,
         };
     }
-    pub fn string(self: *Expression, allocator: std.mem.Allocator) []const u8 {
+    pub fn string(self: *Expression, allocator: std.mem.Allocator) std.mem.Allocator.Error![]const u8 {
         return switch (self.*) {
             .identifier => |e| e.string(allocator),
             .boolean => |e| e.string(allocator),
@@ -82,24 +94,25 @@ pub const Expression = union(enum) {
     }
 };
 
-pub const LetStatemnet = struct {
+pub const LetStatement = struct {
     token: token.Token,
     name: *Identifier,
     value: ?*Expression,
-    pub fn tokenLiteral(self: *LetStatemnet) []const u8 {
+    pub fn tokenLiteral(self: *LetStatement) []const u8 {
         return self.token.Literal;
     }
-    pub fn string(self: *LetStatemnet, gpa: std.mem.Allocator) ![]const u8 {
+    pub fn string(self: *LetStatement, gpa: std.mem.Allocator) ![]const u8 {
         var buf: std.ArrayList(u8) = .empty;
-        try buf.append(gpa, self.token.Literal);
+        try buf.appendSlice(gpa, self.token.Literal);
         try buf.append(gpa, ' ');
         const ns = try self.name.string(gpa);
         defer gpa.free(ns);
-        try buf.append(gpa, " = ");
+        try buf.appendSlice(gpa, ns);
+        try buf.appendSlice(gpa, " = ");
         if (self.value) |stmt| {
             const vs = try stmt.string(gpa);
             defer gpa.free(vs);
-            try buf.append(gpa, vs);
+            try buf.appendSlice(gpa, vs);
         }
         try buf.append(gpa, ';');
         return buf.toOwnedSlice(gpa);
@@ -112,13 +125,34 @@ pub const ReturnStatement = struct {
     pub fn tokenLiteral(self: *ReturnStatement) []const u8 {
         return self.token.Literal;
     }
-    pub fn string(self: *ReturnStatement) ![]const u8 {
+    pub fn string(self: *ReturnStatement, allocator: std.mem.Allocator) ![]const u8 {
+        var buf: std.ArrayList(u8) = .empty;
+        try buf.appendSlice(allocator, self.token.Literal);
+        try buf.append(allocator, ' ');
         if (self.return_value) |item| {
-            return item.tokenLiteral();
+            const vs = try item.string(allocator);
+            defer allocator.free(vs);
+            try buf.appendSlice(allocator, vs);
         }
+        try buf.append(allocator, ';');
+        return buf.toOwnedSlice(allocator);
     }
 };
-pub const ExpressionStatement = struct { token: token.Token, expression: ?*Expression };
+pub const ExpressionStatement = struct {
+    token: token.Token,
+    expression: ?*Expression,
+
+    pub fn tokenLiteral(self: *ExpressionStatement) []const u8 {
+        return self.token.Literal;
+    }
+
+    pub fn string(self: *ExpressionStatement, allocator: std.mem.Allocator) ![]const u8 {
+        if (self.expression) |exp| {
+            return exp.string(allocator);
+        }
+        return "";
+    }
+};
 
 pub const BlockStatement = struct {
     token: token.Token,
@@ -143,32 +177,33 @@ pub const Identifier = struct {
     pub fn tokenLiteral(self: *Identifier) []const u8 {
         return self.token.Literal;
     }
-    pub fn string(self: *Identifier, _: std.mem.Allocator) []const u8 {
-        return self.value;
+    pub fn string(self: *Identifier, allocator: std.mem.Allocator) ![]const u8 {
+        return allocator.dupe(u8, self.value);
     }
 };
 
 pub const Boolean = struct {
     token: token.Token,
     value: bool,
-    pub fn tokenLiteral(self: *ReturnStatement) []const u8 {
+    pub fn tokenLiteral(self: *Boolean) []const u8 {
         return self.token.Literal;
     }
     pub fn string(
         self: *Boolean,
-        _: std.mem.Allocator,
+        allocator: std.mem.Allocator,
     ) ![]const u8 {
-        return self.token.Literal;
+        return allocator.dupe(u8, self.token.Literal);
     }
 };
 
 pub const IntegerLiteral = struct {
     token: token.Token,
+    value: i64,
     pub fn tokenLiteral(self: *IntegerLiteral) []const u8 {
         return self.token.Literal;
     }
-    pub fn string(self: *IntegerLiteral) ![]const u8 {
-        return self.token.Literal;
+    pub fn string(self: *IntegerLiteral, allocator: std.mem.Allocator) ![]const u8 {
+        return allocator.dupe(u8, self.token.Literal);
     }
 };
 
@@ -196,7 +231,7 @@ pub const PrefixExpression = struct {
 };
 
 pub const InfixExpression = struct {
-    token: token.Token, // 操作符 token，如 '+'
+    token: token.Token, // 操作符 token，'+'
     left: ?*Expression,
     operator: []const u8,
     right: ?*Expression,
@@ -205,7 +240,7 @@ pub const InfixExpression = struct {
         return self.token.Literal;
     }
 
-    pub fn string(self: InfixExpression, allocator: std.mem.Allocator) ![]const u8 {
+    pub fn string(self: *InfixExpression, allocator: std.mem.Allocator) ![]const u8 {
         var buf: std.ArrayList(u8) = .empty;
         try buf.append(allocator, '(');
         if (self.left) |l| {
@@ -231,6 +266,34 @@ pub const IfExpression = struct {
     condition: ?*Expression,
     consequence: ?*BlockStatement,
     alternative: ?*BlockStatement,
+
+    pub fn tokenLiteral(self: *IfExpression) []const u8 {
+        return self.token.Literal;
+    }
+
+    pub fn string(self: *IfExpression, allocator: std.mem.Allocator) ![]const u8 {
+        var buf: std.ArrayList(u8) = .empty;
+        try buf.appendSlice(allocator, "if");
+        if (self.condition) |cond| {
+            const cs = try cond.string(allocator);
+            defer allocator.free(cs);
+            try buf.append(allocator, ' ');
+            try buf.appendSlice(allocator, cs);
+        }
+        try buf.append(allocator, ' ');
+        if (self.consequence) |cons| {
+            const cs = try cons.string(allocator);
+            defer allocator.free(cs);
+            try buf.appendSlice(allocator, cs);
+        }
+        if (self.alternative) |alt| {
+            try buf.appendSlice(allocator, "else ");
+            const as = try alt.string(allocator);
+            defer allocator.free(as);
+            try buf.appendSlice(allocator, as);
+        }
+        return buf.toOwnedSlice(allocator);
+    }
 };
 
 pub const FunctionLiteral = struct {
@@ -257,7 +320,7 @@ pub const FunctionLiteral = struct {
             defer allocator.free(bs);
             try buf.appendSlice(allocator, bs);
         }
-        try buf.toOwnedSlice(allocator);
+        return try buf.toOwnedSlice(allocator);
     }
 };
 
@@ -266,7 +329,7 @@ pub const CallExpression = struct {
     function: ?*Expression,
     arguments: std.ArrayListUnmanaged(*Expression),
 
-    pub fn tokenLiteral(self: CallExpression) []const u8 {
+    pub fn tokenLiteral(self: *CallExpression) []const u8 {
         return self.token.Literal;
     }
 
@@ -277,7 +340,7 @@ pub const CallExpression = struct {
             defer allocator.free(fs);
             try buf.appendSlice(allocator, fs);
         }
-        try buf.append('(');
+        try buf.append(allocator, '(');
         for (self.arguments.items, 0..) |arg, i| {
             if (i > 0) try buf.appendSlice(allocator, ", ");
             const arg_str = try arg.string(allocator);

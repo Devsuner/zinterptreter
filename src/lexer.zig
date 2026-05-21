@@ -14,7 +14,6 @@ pub const Lexer = struct {
     }
     pub fn nextToken(l: *Lexer, gpa: std.mem.Allocator) ![]token.Token {
         var list: std.ArrayList(token.Token) = .empty;
-        std.debug.print("Begin\n", .{});
         state: switch (State.start) {
             .start => {
                 if (l.ch == null) {
@@ -63,7 +62,6 @@ pub const Lexer = struct {
                         }
                     }
                     try list.append(gpa, .{ .Type = token_type, .Literal = l.source[start..l.rdPosition] });
-                    std.debug.print("Literal {s}\n", .{l.source[l.atPosition..l.rdPosition]});
                     l.readChar();
                     continue :state .start;
                 }
@@ -80,7 +78,6 @@ pub const Lexer = struct {
                 const str = l.source[start..l.atPosition];
                 const num = try std.fmt.parseInt(i64, str, 10);
                 try list.append(gpa, .{ .Type = .{ .int = num }, .Literal = str });
-                std.debug.print("Literal {s}\n", .{str});
                 continue :state .start;
             },
             .indentifer => {
@@ -95,7 +92,6 @@ pub const Lexer = struct {
                 const str = l.source[start..l.atPosition];
                 const tokentype = l.lookIndent(str);
                 try list.append(gpa, .{ .Type = tokentype, .Literal = str });
-                std.debug.print("Literal {s}\n", .{str});
                 continue :state .start;
             },
         }
@@ -125,7 +121,7 @@ pub const Lexer = struct {
         if (token.keywords.get(ident)) |token_type| {
             return token_type;
         }
-        return .{ .ident = ident };
+        return .ident;
     }
 };
 
@@ -150,10 +146,9 @@ test "nextToken_From go" {
     ;
     var l: Lexer = .init(input);
     const tokenList = try l.nextToken(gpa);
-    std.debug.print("Begin test\n", .{});
     defer gpa.free(tokenList);
     const Expected = struct {
-        expected_type: std.meta.Tag(token.TokenType), // 假设你的 TokenType 是 union(enum)
+        expected_type: std.meta.Tag(token.TokenType),
         expected_literal: []const u8,
     };
 
@@ -206,7 +201,7 @@ test "nextToken_From go" {
         .{ .expected_type = .gt, .expected_literal = ">" },
         .{ .expected_type = .int, .expected_literal = "5" },
         .{ .expected_type = .semicolon, .expected_literal = ";" },
-        // --- 补全 if-else 部分 ---
+
         .{ .expected_type = .@"if", .expected_literal = "if" },
         .{ .expected_type = .lparen, .expected_literal = "(" },
         .{ .expected_type = .int, .expected_literal = "5" },
@@ -224,7 +219,7 @@ test "nextToken_From go" {
         .{ .expected_type = .false, .expected_literal = "false" },
         .{ .expected_type = .semicolon, .expected_literal = ";" },
         .{ .expected_type = .rbrace, .expected_literal = "}" },
-        // --- 补全逻辑判断部分 ---
+
         .{ .expected_type = .int, .expected_literal = "10" },
         .{ .expected_type = .eq, .expected_literal = "==" },
         .{ .expected_type = .int, .expected_literal = "10" },
@@ -233,21 +228,17 @@ test "nextToken_From go" {
         .{ .expected_type = .not_eq, .expected_literal = "!=" },
         .{ .expected_type = .int, .expected_literal = "9" },
         .{ .expected_type = .semicolon, .expected_literal = ";" },
-        // --- 别忘了 EOF ---
+
         .{ .expected_type = .eof, .expected_literal = "" },
     };
-    // 核心断言逻辑
+    //
     for (tests, 0..) |expected, i| {
         const actual = tokenList[i];
 
-        // 校验 Token 类型
-        // 使用 @tagName 获取 union enum 的标签名进行对比，报错时更清晰
         try std.testing.expectEqual(expected.expected_type, std.meta.activeTag(actual.Type));
 
-        // 校验 Literal 字符串内容
         try std.testing.expectEqualStrings(expected.expected_literal, actual.Literal);
     }
 
-    // 确保生成的 Token 数量也完全一致
     try std.testing.expectEqual(tests.len, tokenList.len);
 }
